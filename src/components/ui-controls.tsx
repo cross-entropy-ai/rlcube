@@ -133,7 +133,7 @@ export const UIControls = () => {
                 value={scrambleLength}
                 onChange={(value) => setScrambleLength(value as number)}
                 minValue={1}
-                maxValue={6}
+                maxValue={30}
                 step={1}
               />
             </div>

@@ -27,7 +27,7 @@ export const ControlContext = createContext<ControlContextType>({
   setCubeRoughness: () => {},
   cubeSpeed: 8,
   setCubeSpeed: () => {},
-  scrambleLength: 6,
+  scrambleLength: 20,
   setScrambleLength: () => {},
   background: 'sunset',
   setBackground: () => {},
@@ -43,7 +43,7 @@ export const ControlProvider = ({ children }: { children: React.ReactNode }) => 
   const [showRotationIndicators, setShowRotationIndicators] = useState(false);
   const [cubeRoughness, setCubeRoughness] = useState(0.5);
   const [cubeSpeed, setCubeSpeed] = useState(8);
-  const [scrambleLength, setScrambleLength] = useState(6);
+  const [scrambleLength, setScrambleLength] = useState(20);
   const [background, setBackground] = useState<PresetsType>('sunset');
   const [rubiksCubeRef, setRubiksCubeRef] = useState<RefObject<RubiksCubeRef | null> | undefined>(undefined);
 
