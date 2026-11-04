@@ -15,28 +15,20 @@ https://github.com/user-attachments/assets/0f6cdf0c-37f5-4f7c-a367-c696e21ad4dc
 
 ## How it works
 
-In this reinforcement learning approach to solving the Rubik’s Cube, we begin by training a neural network that learns both a value function and a policy function. The value function evaluates the quality of the current state, while the policy function guides the choice of the next move. To search for the optimal solution, we then apply Monte Carlo Tree Search (MCTS), which balances exploration and exploitation during decision-making.
+We train a value network with Deep Approximate Value Iteration (DAVI), following [Solving the Rubik's Cube with Deep Reinforcement Learning and Search](https://arxiv.org/abs/1805.07470) (DeepCubeA). The network learns the *cost-to-go* of a state, i.e. how many moves it is from solved, purely by bootstrapping: each training state's target is `1 + min` over its neighbours' cost-to-go as estimated by a periodically-updated target network, with the solved state anchored at 0. No ground-truth distances are used.
 
-Our overall algorithm design is inspired by the paper [Solving the Rubik’s Cube with Deep Reinforcement Learning and Search](https://arxiv.org/abs/1805.07470). However, we introduced a few simple modifications in the network component to better suit our implementation.
+To keep the state space small, the solver only turns the Front, Right and Up faces, so the back-left-down corner never moves and whole-cube orientations disappear from the state space. Solutions are then found with **batch weighted A\*** search, using the network as the heuristic.
 
 ## 🏋️‍♂️ Train the Model
 
-1. Navigate to the `rlcube` directory:
-   ```
-   cd rlcube
-   ```
-2. Install dependencies:
+1. Install dependencies:
    ```
    uv sync
    ```
-3. Activate the virtual environment:
+2. Start training (about an hour on an Apple Silicon Mac):
    ```
-   source .venv/bin/activate
+   uv run python -m rlcube.train.train
    ```
-4. Start training:
-   ```
-   python -m rlcube.train.train
-   ```
+   The script prints the loss and, every 2,000 iterations, the A\* solve rate on 100 random cubes.
 
-After training, your model will be saved in the `models` folder.  
-Please rename the trained file to `model_final.pth` so it can be used by the API. 🎯
+Checkpoints are written to `checkpoints/`. Copy `checkpoint_best.pth` to `checkpoint_final.pth` so the API uses it (or point `RLCUBE_CHECKPOINT` at any checkpoint). 🎯

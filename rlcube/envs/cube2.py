@@ -11,7 +11,7 @@ D = 5
 
 class Cube2Env(gym.Env):
     def __init__(self):
-        super(Cube2Env, self).__init__()
+        super().__init__()
         self.action_space = gym.spaces.Discrete(12)
         self.observation_space = gym.spaces.Box(
             low=0, high=1, shape=(24, 6), dtype=np.int8
@@ -288,3 +288,59 @@ def batch_is_solved(states: np.ndarray) -> np.ndarray:
 def batch_one_hot(states: np.ndarray) -> np.ndarray:
     """states: (B, 24) color indices -> (B, 24, 6) float32, same encoding as Cube2Env.obs."""
     return np.eye(6, dtype=np.float32)[states]
+
+
+# ---------------------------------------------------------------------------
+# Reduced, orientation-free representation
+#
+# F/R/U (and inverses) never move the back-left-down corner, so restricting to
+# these 6 actions removes the 24 whole-cube orientations from the state space
+# (88M -> 3.67M) without losing any reachable configuration. Because those
+# actions are a subset of the 12 env actions, solutions can be sent to the
+# frontend unchanged.
+# ---------------------------------------------------------------------------
+
+REDUCED_ACTIONS = np.array([0, 1, 4, 5, 8, 9])  # F, F', R, R', U, U'
+REDUCED_PERMS = PERMS[REDUCED_ACTIONS]
+FIXED_STICKERS = np.array([B * 4, L * 4, D * 4])  # the back-left-down corner
+SOLVED_STATE = np.repeat(np.arange(6, dtype=np.int8), 4)
+
+
+def canonicalize(states: np.ndarray) -> np.ndarray:
+    """Relabel colors so the fixed corner shows the B/L/D colors of SOLVED_STATE.
+
+    Opposite colors are pairs (0,1), (2,3), (4,5), so the relabeling is c -> c^1
+    for the opposite face. A cube in any orientation maps to the same canonical
+    state, whose goal is exactly SOLVED_STATE.
+    states: (B, 24) -> (B, 24)
+    """
+    states = np.asarray(states, dtype=np.int8).reshape(-1, 24)
+    mapping = np.zeros((len(states), 6), dtype=np.int8)
+    rows = np.arange(len(states))
+    for sticker, target in zip(FIXED_STICKERS, (B, L, D)):
+        color = states[:, sticker]
+        mapping[rows, color] = target
+        mapping[rows, color ^ 1] = target ^ 1
+    return np.take_along_axis(mapping, states.astype(np.int64), axis=1)
+
+
+def random_scrambles(
+    num: int, max_depth: int, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """`num` canonical states scrambled 1..max_depth reduced moves (uniform).
+
+    Never plays the inverse of the previous move. Returns (states, depths).
+    """
+    depths = rng.integers(1, max_depth + 1, size=num)
+    states = np.tile(SOLVED_STATE, (num, 1))
+    prev = rng.integers(0, 6, size=num)
+    for t in range(max_depth):
+        r = rng.integers(0, 5, size=num)
+        inv = prev ^ 1
+        a = np.where(r < inv, r, r + 1)
+        a = np.where(t == 0, rng.integers(0, 6, size=num), a)
+        active = t < depths
+        moved = np.take_along_axis(states, REDUCED_PERMS[a], axis=1)
+        states = np.where(active[:, None], moved, states)
+        prev = np.where(active, a, prev)
+    return states, depths

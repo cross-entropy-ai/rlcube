@@ -1,6 +1,5 @@
 from rlcube.envs.cube2 import Cube2Env
 
-
 if __name__ == "__main__":
     print("Testing Cube2Env.from_obs")
     env = Cube2Env()

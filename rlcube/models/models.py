@@ -1,27 +1,6 @@
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
-from rlcube.envs.cube2 import Cube2Env
-import numpy as np
-
-
-class Reward(nn.Module):
-    def __init__(self):
-        super(Reward, self).__init__()
-
-    def forward(self, batch_obs):
-        one_indices = batch_obs.argmax(dim=2)
-        # (batch, 24) -> (batch, 6, 4), 6 faces, 4 stickers
-        face_indices = one_indices.view(batch_obs.shape[0], 6, 4)
-        # (batch, 6), For each face, check if all stickers have the same index, i.e. compare with the first sticker
-        face_solved = (face_indices == face_indices[:, :, 0:1]).all(dim=2)  #
-        # (batch,), For each batch, check if all faces are solved
-        solved = face_solved.all(dim=1)
-        return torch.where(
-            solved,
-            torch.tensor(1, device=batch_obs.device, dtype=torch.float32),
-            torch.tensor(-1, device=batch_obs.device, dtype=torch.float32),
-        )
+import torch.nn.functional as F
+from torch import nn
 
 
 class ResidualBlock(nn.Module):
@@ -33,99 +12,45 @@ class ResidualBlock(nn.Module):
         self.fc2 = nn.Linear(hidden_dim, dim)
 
     def forward(self, x):
-        residual = x
         out = self.fc1(F.relu(self.ln1(x)))
         out = self.fc2(F.relu(self.ln2(out)))
-        out = out + residual
-        return out
+        return out + x
 
 
-class DNN(nn.Module):
+class ValueNet(nn.Module):
+    """Cost-to-go estimator: predicts how many moves a state is from solved.
+
+    Input: (B, 24, 6) one-hot stickers of a canonical state (see
+    rlcube.envs.cube2.canonicalize). Output: (B,) non-negative cost-to-go.
+    """
+
     def __init__(self, hidden_dim=512, num_residual_blocks=4):
         super().__init__()
-        input_dim = 24 * 6
-        self.fc_in = nn.Linear(input_dim, hidden_dim)
-
-        self.residual_blocks = nn.ModuleList(
-            [
+        self.fc_in = nn.Linear(24 * 6, hidden_dim)
+        self.residual_blocks = nn.Sequential(
+            *[
                 ResidualBlock(hidden_dim, hidden_dim * 2)
                 for _ in range(num_residual_blocks)
             ]
         )
-
-        # Value head
-        self.fc_value = nn.Sequential(
-            nn.Linear(hidden_dim, 64), nn.ReLU(), nn.Linear(64, 1)
-        )
-        # Policy head
-        self.fc_policy = nn.Sequential(
-            nn.Linear(hidden_dim, 64), nn.ReLU(), nn.Linear(64, 12)
-        )
+        self.ln_out = nn.LayerNorm(hidden_dim)
+        self.fc_out = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
-        batch_size = x.size(0)
-        x = x.view(batch_size, -1)
-        out = F.relu(self.fc_in(x))
-        for block in self.residual_blocks:
-            out = block(out)
-        value = self.fc_value(out)
-        policy = self.fc_policy(out)
-        return value, policy
+        out = F.relu(self.fc_in(x.reshape(x.size(0), -1)))
+        out = self.residual_blocks(out)
+        return self.fc_out(F.relu(self.ln_out(out))).view(-1)
 
     def save(self, filepath: str):
         torch.save(self.state_dict(), filepath)
 
     def load(self, filepath: str):
-        self.load_state_dict(torch.load(filepath, map_location=torch.device("cpu")))
-
-
-class DNN2(nn.Module):
-    def __init__(self):
-        super(DNN2, self).__init__()
-
-        self.body = nn.Sequential(
-            nn.Linear(24 * 6, 4096), nn.ELU(), nn.Linear(4096, 2048), nn.ELU()
-        )
-        self.policy = nn.Sequential(nn.Linear(2048, 512), nn.ELU(), nn.Linear(512, 12))
-        self.value = nn.Sequential(nn.Linear(2048, 512), nn.ELU(), nn.Linear(512, 1))
-
-    def forward(self, x):
-        batch_size = x.size(0)
-        x = x.view(batch_size, -1)
-        x = self.body(x)
-        value = self.value(x)
-        policy = self.policy(x)
-        return value, policy
-
-    def save(self, filepath: str):
-        torch.save(self.state_dict(), filepath)
-
-    def load(self, filepath: str):
-        self.load_state_dict(torch.load(filepath))
+        self.load_state_dict(torch.load(filepath, map_location="cpu"))
 
 
 if __name__ == "__main__":
-    print("Testing RewardNet")
-    env = Cube2Env()
-    obs, _ = env.reset()
-    obs1, _, _, _, _ = env.step(1)
-    obs2, _, _, _, _ = env.step(2)
-    x = torch.tensor(np.array([obs, obs1, obs2]))
-    print("Input shape:", x.shape)
-    print("Output:", Reward()(x))
-    print()
-
-    print("Testing ResidualBlock, input_dim=24, hidden_dim=128")
+    net = ValueNet()
     x = torch.randn(4, 24, 6)
     print("Input shape:", x.shape)
-    print("Output shape:", ResidualBlock(6, 128)(x).shape)
-    print()
-
-    print("Testing Cube2VNetwork, input_dim=24, num_residual_blocks=4")
-    x = torch.randn(4, 24, 6)
-    print("Input shape:", x.shape)
-    net = DNN()
-    y = net(x)
-    print("Output value shape:", y["value"].shape)
-    print("Output policy shape:", y["policy"].shape)
+    print("Output shape:", net(x).shape)
     print("Number of parameters:", sum(p.numel() for p in net.parameters()))
