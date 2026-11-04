@@ -255,3 +255,36 @@ class Cube2Env(gym.Env):
 
     def print_js_code(self):
         print(f"rotationController.setState({self.state.tolist()});")
+
+
+def _build_permutations() -> np.ndarray:
+    """PERMS[a][i] = index of the sticker that moves to position i under action a.
+
+    Derived from Cube2Env.step so the two can never drift apart. With flattened
+    (24,) states this gives `new_state = state[PERMS[a]]`, which also works on
+    batches: `states[:, PERMS[a]]`.
+    """
+    env = Cube2Env()
+    perms = []
+    for a in range(12):
+        env.state = np.arange(24, dtype=np.int8).reshape(6, 4)
+        env.obs = lambda: None  # labels 0..23 are not valid colors; skip encoding
+        env.is_solved = lambda: False
+        Cube2Env.step(env, a)
+        perms.append(env.state.reshape(-1).astype(np.int64))
+    return np.stack(perms)
+
+
+PERMS = _build_permutations()
+INVERSE_ACTION = np.array([a ^ 1 for a in range(12)])
+
+
+def batch_is_solved(states: np.ndarray) -> np.ndarray:
+    """states: (B, 24) color indices -> (B,) bool."""
+    faces = states.reshape(-1, 6, 4)
+    return (faces == faces[:, :, :1]).all(axis=(1, 2))
+
+
+def batch_one_hot(states: np.ndarray) -> np.ndarray:
+    """states: (B, 24) color indices -> (B, 24, 6) float32, same encoding as Cube2Env.obs."""
+    return np.eye(6, dtype=np.float32)[states]
